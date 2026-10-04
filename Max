@@ -1,0 +1,280 @@
+--[[
+    CL: STREETS · AUTO SHELF STOCK
+    E=6 | Tween=0.55 | PadWait=3.5 | by Bot
+    F3 = เปิด/ปิดฟาร์ม
+]]
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+
+local CONFIG = {
+    StartPosition   = CFrame.new(1704.56128, 586.969604, 203.164017, 0, 0, -1, -1, 0, 0, 0, 1, 0),
+    TweenSpeed      = 0.55,   -- บิน 0.55
+    EPressCount     = 6,
+    EPressDelay     = 0.08,
+    PadWaitTime     = 3.5,
+    TotalCycles     = 3,
+    MaxScanAttempts = 3,
+    HoldAfterArrive = 0.08,
+}
+
+local FarmEnabled = false
+local currentTween = nil
+local holdBP = nil
+local farmThread = nil
+
+local function GetHRP()
+    local c = LocalPlayer.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function ClearHold()
+    if holdBP then pcall(function() holdBP:Destroy() end) holdBP = nil end
+end
+
+local function ForceStop(hrp)
+    if not hrp then return end
+    pcall(function()
+        hrp.AssemblyLinearVelocity = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        hrp.Velocity = Vector3.zero
+        hrp.RotVelocity = Vector3.zero
+    end)
+end
+
+local function HoldPosition(hrp, pos)
+    if not hrp then return end
+    ClearHold()
+    ForceStop(hrp)
+    hrp.CFrame = CFrame.new(pos)
+    holdBP = Instance.new("BodyPosition")
+    holdBP.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    holdBP.Position = pos
+    holdBP.P = 80000
+    holdBP.D = 2200
+    holdBP.Parent = hrp
+end
+
+local function StopTween()
+    if currentTween then pcall(function() currentTween:Cancel() end) currentTween = nil end
+    ClearHold()
+    local hrp = GetHRP()
+    if hrp then ForceStop(hrp) end
+end
+
+local function TweenTo(targetCF)
+    StopTween()
+    local hrp = GetHRP()
+    if not hrp then return false end
+    local pos = targetCF.Position
+    ForceStop(hrp)
+    local dist = (hrp.Position - pos).Magnitude
+    local time = math.clamp(dist / (CONFIG.TweenSpeed * 55), 0.12, 4)
+    currentTween = TweenService:Create(hrp, TweenInfo.new(time, Enum.EasingStyle.Linear), {CFrame = CFrame.new(pos)})
+    currentTween:Play()
+    currentTween.Completed:Wait()
+    currentTween = nil
+    HoldPosition(hrp, pos)
+    task.wait(CONFIG.HoldAfterArrive)
+    ForceStop(hrp)
+    return true
+end
+
+local function PressE()
+    pcall(function()
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+        task.wait(0.05)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+    end)
+    task.wait(CONFIG.EPressDelay)
+end
+
+local function ScanPads()
+    local stock = Workspace:FindFirstChild("StockShelves")
+    if not stock then return nil, nil end
+    for _, group in pairs(stock:GetChildren()) do
+        local pad = nil
+        for _, child in pairs(group:GetChildren()) do
+            if child:IsA("BasePart") and string.lower(child.Name) == "pad" then
+                pad = child
+                break
+            end
+        end
+        if not pad then
+            for _, child in pairs(group:GetChildren()) do
+                if child:IsA("BasePart") then pad = child break end
+            end
+        end
+        if pad and pad.Transparency == 0 then return pad, group end
+    end
+    return nil, nil
+end
+
+local function GetHitboxCF(group)
+    if not group then return nil end
+    for _, child in pairs(group:GetChildren()) do
+        if child:IsA("BasePart") and string.lower(child.Name) == "hitbox" then
+            return child.CFrame
+        end
+    end
+    for _, child in pairs(group:GetChildren()) do
+        if child:IsA("BasePart") then return child.CFrame end
+    end
+    return nil
+end
+
+local function FarmLoop()
+    while FarmEnabled do
+        local hrp = GetHRP()
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum or hum.Health <= 0 then
+            StatusLbl.Text = "รอตัวละคร..."
+            task.wait(0.6)
+            continue
+        end
+
+        StatusLbl.Text = "บินจุดเริ่ม..."
+        if not TweenTo(CONFIG.StartPosition) then
+            task.wait(1)
+            continue
+        end
+        task.wait(0.15)
+
+        StatusLbl.Text = "กด E x" .. CONFIG.EPressCount
+        for i = 1, CONFIG.EPressCount do
+            if not FarmEnabled then break end
+            PressE()
+        end
+        task.wait(0.2)
+
+        local lastPad = nil
+        for cycle = 1, CONFIG.TotalCycles do
+            if not FarmEnabled then break end
+            StatusLbl.Text = "Pad " .. cycle .. "/" .. CONFIG.TotalCycles
+
+            local pad, group = nil, nil
+            local tries = 0
+            while tries < CONFIG.MaxScanAttempts and FarmEnabled do
+                pad, group = ScanPads()
+                if pad then break end
+                tries = tries + 1
+                StatusLbl.Text = "สแกนรอบ " .. tries
+                task.wait(0.5)
+            end
+            if not pad then task.wait(0.8) break end
+
+            if lastPad == pad then
+                StatusLbl.Text = "รอ " .. CONFIG.PadWaitTime .. " วิ..."
+                task.wait(CONFIG.PadWaitTime)
+            else
+                local hit = GetHitboxCF(group)
+                if hit then
+                    StatusLbl.Text = "บินไป Pad..."
+                    if TweenTo(hit) then
+                        lastPad = pad
+                        StatusLbl.Text = "รอ " .. CONFIG.PadWaitTime .. " วิ..."
+                        task.wait(CONFIG.PadWaitTime)
+                    end
+                else
+                    task.wait(0.4)
+                end
+            end
+        end
+        StatusLbl.Text = "จบรอบ → เริ่มใหม่"
+        task.wait(0.2)
+    end
+    StopTween()
+    farmThread = nil
+end
+
+local function ToggleFarm()
+    FarmEnabled = not FarmEnabled
+    if FarmEnabled then
+        Btn.Text = "STOP FARM"
+        Btn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        StatusLbl.Text = "กำลังฟาร์ม..."
+        if farmThread then return end
+        farmThread = task.spawn(FarmLoop)
+    else
+        Btn.Text = "START FARM"
+        Btn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
+        StatusLbl.Text = "หยุดแล้ว"
+        StopTween()
+    end
+end
+
+local SG = Instance.new("ScreenGui")
+SG.Name = "CL_Farm_Bot"
+SG.ResetOnSpawn = false
+SG.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.fromOffset(210, 115)
+Frame.Position = UDim2.new(0.5, -105, 0.12, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+Frame.BorderSizePixel = 0
+Frame.Active = true
+Frame.Draggable = true
+Frame.Parent = SG
+Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 10)
+local stroke = Instance.new("UIStroke", Frame)
+stroke.Color = Color3.fromRGB(0, 170, 255)
+stroke.Thickness = 1.3
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 22)
+Title.BackgroundTransparency = 1
+Title.Text = "CL Auto Farm"
+Title.TextColor3 = Color3.fromRGB(0, 200, 255)
+Title.TextSize = 13
+Title.Font = Enum.Font.GothamBold
+Title.Parent = Frame
+
+Btn = Instance.new("TextButton")
+Btn.Size = UDim2.new(1, -20, 0, 38)
+Btn.Position = UDim2.new(0, 10, 0, 28)
+Btn.BackgroundColor3 = Color3.fromRGB(40, 160, 80)
+Btn.Text = "START FARM"
+Btn.TextColor3 = Color3.new(1, 1, 1)
+Btn.TextSize = 14
+Btn.Font = Enum.Font.GothamBold
+Btn.BorderSizePixel = 0
+Btn.Parent = Frame
+Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 8)
+Btn.MouseButton1Click:Connect(ToggleFarm)
+
+StatusLbl = Instance.new("TextLabel")
+StatusLbl.Size = UDim2.new(1, -12, 0, 18)
+StatusLbl.Position = UDim2.new(0, 6, 0, 70)
+StatusLbl.BackgroundTransparency = 1
+StatusLbl.Text = "พร้อม (F3) · E6 · 0.55 · 3.5s"
+StatusLbl.TextColor3 = Color3.fromRGB(160, 170, 200)
+StatusLbl.TextSize = 11
+StatusLbl.Font = Enum.Font.Gotham
+StatusLbl.Parent = Frame
+
+local Credit = Instance.new("TextLabel")
+Credit.Size = UDim2.new(1, 0, 0, 14)
+Credit.Position = UDim2.new(0, 0, 1, -16)
+Credit.BackgroundTransparency = 1
+Credit.Text = "by Bot"
+Credit.TextColor3 = Color3.fromRGB(100, 110, 140)
+Credit.TextSize = 10
+Credit.Font = Enum.Font.Gotham
+Credit.Parent = Frame
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.F3 then ToggleFarm() end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    StopTween()
+end)
+
+print("[CL Auto Farm] E=6 | Tween=0.55 | PadWait=3.5 | by Bot | F3 ✅")
