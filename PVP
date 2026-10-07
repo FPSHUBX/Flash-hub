@@ -1,0 +1,670 @@
+-- ==========================================
+-- CL: Streets - FLY SPEED & SYSTEMS v22 (Added Customizable Color ESP)
+-- ==========================================
+
+-- เคลียร์ของเก่าทิ้งก่อน
+pcall(function()
+    if game:GetService("CoreGui"):FindFirstChild("CL_CleanSystemGui") then
+        game:GetService("CoreGui").CL_CleanSystemGui:Destroy()
+    end
+    if game:GetService("Players").LocalPlayer.PlayerGui:FindFirstChild("CL_CleanSystemGui") then
+        game:GetService("Players").LocalPlayer.PlayerGui.CL_CleanSystemGui:Destroy()
+    end
+end)
+
+local success, Rayfield = pcall(function()
+    return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+end)
+
+if not success or not Rayfield then
+    warn("UI Library Load Failed!")
+    return
+end
+
+local Window = Rayfield:CreateWindow({
+    Name = "CL: Streets - Clean System v22",
+    LoadingTitle = "Loading Systems...",
+    LoadingSubtitle = "by AI Friend",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "CLStreetsHub",
+        FileName = "Config_v22"
+    },
+    Discord = { Enabled = false },
+    KeySystem = false,
+})
+
+-- Tabs
+local MainTab = Window:CreateTab("Combat / Aim", "crosshair")
+local VisualTab = Window:CreateTab("Visuals / ESP", "eye")
+local MoveTab = Window:CreateTab("Movement", "move")
+
+-- Global Variables
+getgenv().SilentAimEnabled = true
+getgenv().ShowFOV = true
+getgenv().FOVRadius = 50
+getgenv().ESPEnabled = true
+
+-- Color ESP Variables (ตัวแปรระบบปรับสี ESP)
+getgenv().ESPColor = Color3.fromRGB(255, 255, 255) -- สีเริ่มต้นของชื่อ (ขาว)
+getgenv().HPColor = Color3.fromRGB(0, 255, 100)  -- สีเริ่มต้นของเลือด (เขียว)
+
+-- X-Ray Variables
+getgenv().XRayEnabled = false
+getgenv().XRayTransparency = 0.5
+
+-- Movement Variables
+getgenv().BypassSpeedEnabled = false
+getgenv().BypassSpeedValue = 22
+getgenv().FlyEnabled = false
+getgenv().FlySpeedValue = 50
+getgenv().HighJumpEnabled = false
+getgenv().JumpPowerValue = 100
+
+-- Hitbox Variables
+getgenv().HitboxEnabled = false
+getgenv().HitboxSize = 8
+
+-- Head Hitbox Variables
+getgenv().HeadHitboxEnabled = false
+getgenv().HeadHitboxScale = 10
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local RS = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local LP = Players.LocalPlayer
+local Cam = workspace.CurrentCamera
+
+-- ==========================================
+-- GUI EXTRAS (FOV & ESP ONLY)
+-- ==========================================
+local gui = Instance.new("ScreenGui")
+gui.Name = "CL_CleanSystemGui"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+pcall(function() gui.Parent = game:GetService("CoreGui") end)
+if not gui.Parent then gui.Parent = LP:WaitForChild("PlayerGui") end
+
+-- วงกลม FOV ตรงกลางจอ
+local fovFrame = Instance.new("Frame", gui)
+fovFrame.Name = "FOVCircle"
+fovFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+fovFrame.Position = UDim2.fromScale(0.5, 0.5)
+fovFrame.Size = UDim2.fromOffset(getgenv().FOVRadius * 2, getgenv().FOVRadius * 2)
+fovFrame.BackgroundTransparency = 1
+fovFrame.BorderSizePixel = 0
+
+local fovStroke = Instance.new("UIStroke", fovFrame)
+fovStroke.Color = Color3.fromRGB(57, 255, 20)
+fovStroke.Thickness = 2
+Instance.new("UICorner", fovFrame).CornerRadius = UDim.new(1, 0)
+
+-- โฟลเดอร์ ESP
+local ESPFolder = Instance.new("Folder", gui)
+ESPFolder.Name = "ESPFolder"
+local espList = {}
+
+local function CreateESP(player)
+    if player == LP then return end
+    local bg = Instance.new("BillboardGui")
+    bg.Name = player.Name.."_ESP"
+    bg.Size = UDim2.fromOffset(120, 45)
+    bg.StudsOffset = Vector3.new(0, 3, 0)
+    bg.AlwaysOnTop = true
+    bg.Parent = ESPFolder
+    
+    local nameLbl = Instance.new("TextLabel", bg)
+    nameLbl.Name = "NameLabel"
+    nameLbl.Size = UDim2.new(1, 0, 0.5, 0)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.TextColor3 = getgenv().ESPColor
+    nameLbl.Font = Enum.Font.GothamBold
+    nameLbl.TextSize = 12
+    nameLbl.TextStrokeTransparency = 0
+    nameLbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLbl.Text = player.Name
+    
+    local hpText = Instance.new("TextLabel", bg)
+    hpText.Name = "HPLabel"
+    hpText.Size = UDim2.new(1, 0, 0.5, 0)
+    hpText.Position = UDim2.fromScale(0, 0.5)
+    hpText.BackgroundTransparency = 1
+    hpText.TextColor3 = getgenv().HPColor
+    hpText.Font = Enum.Font.GothamBold
+    hpText.TextSize = 11
+    hpText.TextStrokeTransparency = 0
+    hpText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    hpText.Text = "HP: 100"
+
+    return {Gui = bg, Text = hpText, NameText = nameLbl, Player = player}
+end
+
+for _, p in pairs(Players:GetPlayers()) do
+    if p ~= LP then espList[p] = CreateESP(p) end
+end
+Players.PlayerAdded:Connect(function(p) if p ~= LP then espList[p] = CreateESP(p) end end)
+Players.PlayerRemoving:Connect(function(p) if espList[p] then espList[p].Gui:Destroy(); espList[p] = nil end end)
+
+-- ==========================================
+-- X-RAY SYSTEM
+-- ==========================================
+local originalMaterials = {}
+
+local function updateXRay()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            for _, part in ipairs(p.Character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    if getgenv().XRayEnabled then
+                        if not originalMaterials[part] then
+                            originalMaterials[part] = {
+                                Transparency = part.Transparency,
+                                LocalTransparencyModifier = part.LocalTransparencyModifier
+                            }
+                        end
+                        part.Transparency = getgenv().XRayTransparency
+                        part.LocalTransparencyModifier = getgenv().XRayTransparency
+                    else
+                        if originalMaterials[part] then
+                            part.Transparency = originalMaterials[part].Transparency
+                            part.LocalTransparencyModifier = originalMaterials[part].LocalTransparencyModifier
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ==========================================
+-- HITBOX SYSTEM
+-- ==========================================
+local HitboxParts = {}
+
+local function createHitbox(player)
+    if player == LP then return end
+    
+    local function onCharacterAdded(char)
+        if HitboxParts[player] then
+            HitboxParts[player]:Destroy()
+            HitboxParts[player] = nil
+        end
+        
+        local rootPart = char:WaitForChild("HumanoidRootPart", 5)
+        if not rootPart then return end
+        
+        local box = Instance.new("Part")
+        box.Name = "ExternalHitbox"
+        box.Shape = Enum.PartType.Block
+        box.Size = Vector3.new(getgenv().HitboxSize, getgenv().HitboxSize, getgenv().HitboxSize)
+        box.Transparency = 0.4
+        box.Color = Color3.fromRGB(255, 0, 0)
+        box.Material = Enum.Material.Neon
+        box.CanCollide = false
+        box.Massless = true
+        box.Anchored = true
+        box.Parent = workspace
+        
+        HitboxParts[player] = box
+        
+        local connection
+        connection = RunService.RenderStepped:Connect(function()
+            if not getgenv().HitboxEnabled or not char or not char.Parent or not rootPart or not rootPart.Parent then
+                box.Transparency = 1
+                return
+            end
+            
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                box.Size = Vector3.new(getgenv().HitboxSize, getgenv().HitboxSize, getgenv().HitboxSize)
+                box.CFrame = rootPart.CFrame
+                box.Transparency = 0.4
+            else
+                box.Transparency = 1
+            end
+        end)
+        
+        char.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                if connection then connection:Disconnect() end
+                if box then box:Destroy() end
+                HitboxParts[player] = nil
+            end
+        end)
+    end
+    
+    player.CharacterAdded:Connect(onCharacterAdded)
+    if player.Character then
+        task.spawn(function()
+            onCharacterAdded(player.Character)
+        end)
+    end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    createHitbox(p)
+end
+Players.PlayerAdded:Connect(createHitbox)
+Players.PlayerRemoving:Connect(function(player)
+    if HitboxParts[player] then
+        HitboxParts[player]:Destroy()
+        HitboxParts[player] = nil
+    end
+end)
+
+-- ==========================================
+-- HEAD HITBOX EXPANSION SYSTEM
+-- ==========================================
+local function saveOriginalHeadSize(head)
+    if not head:FindFirstChild("OriginalSize") then
+        local sizeVal = Instance.new("Vector3Value")
+        sizeVal.Name = "OriginalSize"
+        sizeVal.Value = head.Size
+        sizeVal.Parent = head
+    end
+end
+
+local function updateHeadHitboxes()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local head = p.Character:FindFirstChild("Head")
+            if head and head:IsA("BasePart") then
+                saveOriginalHeadSize(head)
+                local orig = head.OriginalSize.Value
+                
+                if getgenv().HeadHitboxEnabled then
+                    head.Size = orig * getgenv().HeadHitboxScale
+                    head.Transparency = getgenv().XRayEnabled and getgenv().XRayTransparency or 0.5
+                    head.CanCollide = false
+                    head.Massless = true
+                else
+                    head.Size = orig
+                    head.Transparency = getgenv().XRayEnabled and getgenv().XRayTransparency or 0
+                    head.CanCollide = true
+                    head.Massless = false
+                end
+            end
+        end
+    end
+end
+
+-- ==========================================
+-- CORE FUNCTION: ค้นหาเป้าหมาย
+-- ==========================================
+local function getClosestTargetInFOV()
+    local closestTarget = nil
+    local shortestDist = getgenv().FOVRadius
+    local centerScreen = Vector2.new(Cam.ViewportSize.X / 2, Cam.ViewportSize.Y / 2)
+
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr ~= LP and plr.Character then
+            local rootPart = plr.Character:FindFirstChild("HumanoidRootPart")
+            local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+            if rootPart and hum and hum.Health > 0 then
+                local screenPos, onScreen = Cam:WorldToViewportPoint(rootPart.Position)
+                if onScreen then
+                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - centerScreen).Magnitude
+                    if dist < shortestDist then
+                        shortestDist = dist
+                        closestTarget = rootPart
+                    end
+                end
+            end
+        end
+    end
+    return closestTarget
+end
+
+-- ==========================================
+-- UI TABS & CONTROLS SETUP
+-- ==========================================
+MainTab:CreateToggle({
+    Name = "Silent Aim (ล็อกเป้าอัตโนมัติ)",
+    CurrentValue = true,
+    Flag = "SilentAimToggle",
+    Callback = function(v) getgenv().SilentAimEnabled = v end,
+})
+
+MainTab:CreateSection("ตั้งค่า FOV (ปรับวงให้เล็กจิ๋วได้)")
+
+MainTab:CreateSlider({
+    Name = "FOV Circle Size",
+    Range = {10, 400},
+    Increment = 5,
+    Suffix = " px",
+    CurrentValue = 50,
+    Flag = "FOVSize",
+    Callback = function(v) 
+        getgenv().FOVRadius = v 
+        fovFrame.Size = UDim2.fromOffset(v * 2, v * 2)
+    end,
+})
+
+MainTab:CreateSection("Hitbox กล่องสี่เหลี่ยมแดง")
+
+MainTab:CreateToggle({
+    Name = "Hitbox กล่องสี่เหลี่ยมสีแดง",
+    CurrentValue = false,
+    Flag = "HitboxToggle",
+    Callback = function(v) 
+        getgenv().HitboxEnabled = v 
+        if not v then
+            for _, box in pairs(HitboxParts) do
+                if box then box.Transparency = 1 end
+            end
+        end
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "Hitbox Size (สูงสุด 50)",
+    Range = {2, 50},
+    Increment = 1,
+    CurrentValue = 8,
+    Flag = "HitboxSizeSlider",
+    Callback = function(v) getgenv().HitboxSize = v end,
+})
+
+MainTab:CreateSection("ระบบขยายหัว (Head Expander)")
+
+MainTab:CreateToggle({
+    Name = "เปิดระบบขยายหัวคนอื่น",
+    CurrentValue = false,
+    Flag = "HeadHitboxToggle",
+    Callback = function(v) 
+        getgenv().HeadHitboxEnabled = v 
+        if not v then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LP and p.Character then
+                    local head = p.Character:FindFirstChild("Head")
+                    if head then
+                        local orig = head:FindFirstChild("OriginalSize")
+                        if orig then
+                            head.Size = orig.Value
+                            head.Transparency = getgenv().XRayEnabled and getgenv().XRayTransparency or 0
+                            head.CanCollide = true
+                        end
+                    end
+                end
+            end
+        end
+    end,
+})
+
+MainTab:CreateSlider({
+    Name = "ขนาดหัว (สูงสุด 50)",
+    Range = {1, 50},
+    Increment = 1,
+    CurrentValue = 10,
+    Flag = "HeadScaleSlider",
+    Callback = function(v) getgenv().HeadHitboxScale = v end,
+})
+
+-- Visual Tab Controls (เพิ่มส่วนปรับสี ESP และ X-Ray)
+VisualTab:CreateToggle({
+    Name = "Player ESP (ชื่อ & เลือดเหนือหัว)",
+    CurrentValue = true,
+    Flag = "ESPToggle",
+    Callback = function(v) 
+        getgenv().ESPEnabled = v 
+        for _, data in pairs(espList) do data.Gui.Enabled = v end
+    end,
+})
+
+VisualTab:CreateToggle({
+    Name = "Show FOV Circle",
+    CurrentValue = true,
+    Flag = "ShowFOV",
+    Callback = function(v) getgenv().ShowFOV = v end,
+})
+
+VisualTab:CreateSection("ปรับแต่งสี ESP (Color Customization)")
+
+VisualTab:CreateColorPicker({
+    Name = "เปลี่ยนสีชื่อผู้เล่น (ESP Name Color)",
+    Color = Color3.fromRGB(255, 255, 255),
+    Flag = "ESPNameColorPicker",
+    Callback = function(Value)
+        getgenv().ESPColor = Value
+        for _, data in pairs(espList) do
+            if data.NameText then
+                data.NameText.TextColor3 = Value
+            end
+        end
+    end
+})
+
+VisualTab:CreateColorPicker({
+    Name = "เปลี่ยนสีเลือด (ESP HP Color)",
+    Color = Color3.fromRGB(0, 255, 100),
+    Flag = "ESPHPColorPicker",
+    Callback = function(Value)
+        getgenv().HPColor = Value
+        for _, data in pairs(espList) do
+            if data.Text then
+                data.Text.TextColor3 = Value
+            end
+        end
+    end
+})
+
+VisualTab:CreateSection("ระบบเอ็กซเรย์ (X-Ray Players)")
+
+VisualTab:CreateToggle({
+    Name = "เปิด X-Ray ตัวละคร (มองทะลุ)",
+    CurrentValue = false,
+    Flag = "XRayToggle",
+    Callback = function(v) 
+        getgenv().XRayEnabled = v 
+        if not v then
+            for part, data in pairs(originalMaterials) do
+                if part and part.Parent then
+                    part.Transparency = data.Transparency
+                    part.LocalTransparencyModifier = data.LocalTransparencyModifier
+                end
+            end
+            originalMaterials = {}
+        end
+    end,
+})
+
+VisualTab:CreateSlider({
+    Name = "ความโปร่งแสง X-Ray",
+    Range = {0.1, 0.9},
+    Increment = 0.1,
+    CurrentValue = 0.5,
+    Flag = "XRaySlider",
+    Callback = function(v) getgenv().XRayTransparency = v end,
+})
+
+-- Movement Tab Controls
+MoveTab:CreateToggle({
+    Name = "Safe Speed Boost",
+    CurrentValue = false,
+    Flag = "SpeedToggle",
+    Callback = function(v) getgenv().BypassSpeedEnabled = v end,
+})
+
+MoveTab:CreateSlider({
+    Name = "Speed Value",
+    Range = {16, 30},
+    Increment = 1,
+    Suffix = " Spd",
+    CurrentValue = 22,
+    Flag = "SpeedSlider",
+    Callback = function(v) getgenv().BypassSpeedValue = v end,
+})
+
+MoveTab:CreateToggle({
+    Name = "บินอยู่กับที่ (Fly Hack)",
+    CurrentValue = false,
+    Flag = "FlyToggle",
+    Callback = function(v) 
+        getgenv().FlyEnabled = v 
+        if not v and LP.Character then
+            local hrp = LP.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                for _, child in pairs(hrp:GetChildren()) do
+                    if child.Name == "FlyBodyVelocity" or child.Name == "FlyBodyGyro" then
+                        child:Destroy()
+                    end
+                end
+            end
+        end
+    end,
+})
+
+MoveTab:CreateSlider({
+    Name = "ปรับความเร็วการบิน (Fly Speed)",
+    Range = {20, 200},
+    Increment = 5,
+    Suffix = " Spd",
+    CurrentValue = 50,
+    Flag = "FlySpeedSlider",
+    Callback = function(v) getgenv().FlySpeedValue = v end,
+})
+
+MoveTab:CreateToggle({
+    Name = "กระโดดสูง (High Jump Bypass)",
+    CurrentValue = false,
+    Flag = "HighJumpToggle",
+    Callback = function(v) getgenv().HighJumpEnabled = v end,
+})
+
+MoveTab:CreateSlider({
+    Name = "ระดับความสูงของการกระโดด",
+    Range = {50, 400},
+    Increment = 10,
+    Suffix = " Power",
+    CurrentValue = 100,
+    Flag = "JumpPowerSlider",
+    Callback = function(v) getgenv().JumpPowerValue = v end,
+})
+
+-- ==========================================
+-- HIGH JUMP BYPASS
+-- ==========================================
+UserInputService.JumpRequest:Connect(function()
+    if getgenv().HighJumpEnabled and LP.Character then
+        local hrp = LP.Character:FindFirstChild("HumanoidRootPart")
+        local hum = LP.Character:FindFirstChildOfClass("Humanoid")
+        if hrp and hum and hum.Health > 0 then
+            hrp.AssemblyLinearVelocity = Vector3.new(hrp.AssemblyLinearVelocity.X, getgenv().JumpPowerValue, hrp.AssemblyLinearVelocity.Z)
+        end
+    end
+end)
+
+-- ==========================================
+-- HOOK WEAPON
+-- ==========================================
+pcall(function()
+    local BaseWeapon = require(RS.WeaponsSystem.Libraries.BaseWeapon)
+    local oldFire = BaseWeapon.fire
+    BaseWeapon.fire = function(self, origin, dir, charge)
+        if getgenv().SilentAimEnabled then
+            local targetPart = getClosestTargetInFOV()
+            if targetPart then
+                dir = (targetPart.Position - origin).Unit
+            end
+        end
+        return oldFire(self, origin, dir, charge)
+    end
+end)
+
+-- ==========================================
+-- RENDER & MOVEMENT LOOP
+-- ==========================================
+RunService.RenderStepped:Connect(function(dt)
+    fovFrame.Visible = getgenv().ShowFOV
+    
+    if getgenv().HeadHitboxEnabled then
+        updateHeadHitboxes()
+    end
+    
+    if getgenv().XRayEnabled then
+        updateXRay()
+    end
+    
+    if getgenv().ESPEnabled then
+        for _, data in pairs(espList) do
+            local plr = data.Player
+            if plr.Character and plr.Character:FindFirstChild("Head") and plr.Character:FindFirstChildOfClass("Humanoid") then
+                local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+                if hum.Health > 0 then
+                    data.Gui.Adornee = plr.Character.Head
+                    data.Gui.Enabled = true
+                    data.Text.Text = "HP: ".. math.floor(hum.Health)
+                else
+                    data.Gui.Enabled = false
+                end
+            else
+                data.Gui.Enabled = false
+            end
+        end
+    else
+        for _, data in pairs(espList) do data.Gui.Enabled = false end
+    end
+    
+    if getgenv().BypassSpeedEnabled and LP.Character then
+        local hum = LP.Character:FindFirstChildOfClass("Humanoid")
+        local hrp = LP.Character:FindFirstChild("HumanoidRootPart")
+        if hum and hrp and hum.MoveDirection.Magnitude > 0 then
+            hrp.CFrame = hrp.CFrame + (hum.MoveDirection * (getgenv().BypassSpeedValue - 16) * dt)
+        end
+    end
+    
+    if getgenv().FlyEnabled and LP.Character then
+        local hrp = LP.Character:FindFirstChild("HumanoidRootPart")
+        local hum = LP.Character:FindFirstChildOfClass("Humanoid")
+        if hrp and hum then
+            local bv = hrp:FindFirstChild("FlyBodyVelocity")
+            local bg = hrp:FindFirstChild("FlyBodyGyro")
+            
+            if not bv then
+                bv = Instance.new("BodyVelocity")
+                bv.Name = "FlyBodyVelocity"
+                bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                bv.Velocity = Vector3.new(0, 0, 0)
+                bv.Parent = hrp
+            end
+            
+            if not bg then
+                bg = Instance.new("BodyGyro")
+                bg.Name = "FlyBodyGyro"
+                bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+                bg.CFrame = Cam.CFrame
+                bg.Parent = hrp
+            end
+            
+            bg.CFrame = Cam.CFrame
+            local moveDir = hum.MoveDirection
+            
+            if moveDir.Magnitude > 0 then
+                bv.Velocity = (Cam.CFrame.LookVector * (moveDir:Dot(Cam.CFrame.LookVector)) + Cam.CFrame.RightVector * (moveDir:Dot(Cam.CFrame.RightVector))) * getgenv().FlySpeedValue
+            else
+                bv.Velocity = Vector3.new(0, 0, 0)
+            end
+        end
+    else
+        if LP.Character then
+            local hrp = LP.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                for _, child in pairs(hrp:GetChildren()) do
+                    if child.Name == "FlyBodyVelocity" or child.Name == "FlyBodyGyro" then
+                        child:Destroy()
+                    end
+                end
+            end
+        end
+    end
+end)
+
+Rayfield:LoadConfiguration()
+
+Rayfield:Notify({
+    Title = "CL: Streets Loaded v22!",
+    Content = "Added Color ESP & X-Ray Successfully!",
+    Duration = 5,
+    Image = 4483362458,
+})
