@@ -1,0 +1,778 @@
+--[[FLASH PANEL - CL STREETS - Auto Fly + Head Hitbox + Transparency (Optimized & Smooth Speed)]]
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
+local HttpService = game:GetService("HttpService")
+local RS = game:GetService("ReplicatedStorage")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+local IMAGE_ID = "rbxassetid://98608719203780"
+local SOUND_ID = "rbxassetid://133196982070163"
+local CONFIG_FOLDER = "FlashStreets"
+local CONFIG_FILE = "FlashStreets/config.json"
+
+local function playClick()
+    local s = Instance.new("Sound")
+    s.SoundId = SOUND_ID
+    s.Volume = 0.5
+    s.Parent = SoundService
+    s:Play()
+    s.Ended:Connect(function() s:Destroy() end)
+    task.delay(3, function() if s and s.Parent then s:Destroy() end end)
+end
+
+local Config = {
+    SilentAim = true,
+    ShowFOV = true,
+    FOVSize = 50,
+    FOVColor = Color3.fromRGB(57, 255, 20),
+    FOVThick = 2,
+    FOVTrans = 0,
+    
+    -- ★ Head Hitbox
+    HeadHitboxEnabled = false,
+    HeadHitboxScale = 10,
+    HeadTransparency = 0.5,
+    
+    ESP = true,
+    ESPColor = Color3.fromRGB(255, 255, 255),
+    HPColor = Color3.fromRGB(0, 255, 100),
+    Skeleton = false,
+    SkeletonDist = 800,
+    SkeletonThick = 1.5,
+    SkullColor = Color3.fromRGB(255, 100, 100),
+    TorsoColor = Color3.fromRGB(255, 200, 100),
+    ArmColor = Color3.fromRGB(100, 200, 255),
+    LegColor = Color3.fromRGB(100, 255, 100),
+    Tracer = false,
+    TracerColor = Color3.fromRGB(0, 200, 255),
+    TracerThick = 2,
+    BoxESP = false,
+    BoxColor = Color3.fromRGB(255, 100, 100),
+    BoxThick = 2,
+    
+    -- ★ Speed (Max 32 & Smooth)
+    Speed = false,
+    SpeedVal = 22,
+    
+    Fly = false,
+    FlySpeed = 50,
+    AutoFly = false,
+    AutoFlySpeed = 100,
+    AutoFlyWait = 1.5,
+    AutoFlyLoop = true,
+    NoReload = true,
+    AntiAFK = false,
+}
+
+local WAYPOINTS = {
+    Vector3.new(2252.81, 605.31, 314.73),
+    Vector3.new(2253.19, 603.65, 145.26),
+    Vector3.new(1973.28, 607.79, 352.58),
+    Vector3.new(1776.15, 612.77, 135.97),
+    Vector3.new(1789.46, 607.61, 419.74),
+    Vector3.new(1998.29, 606.87, 130.95),
+}
+
+local function canFile()
+    return typeof(writefile) == "function" and typeof(readfile) == "function" and typeof(isfile) == "function"
+end
+
+local function colorToTable(c)
+    return {R = c.R, G = c.G, B = c.B}
+end
+
+local function tableToColor(t)
+    if not t then return Color3.new(1,1,1) end
+    return Color3.new(t.R or 1, t.G or 1, t.B or 1)
+end
+
+local function saveConfig()
+    if not canFile() then return false end
+    pcall(function()
+        if typeof(makefolder) == "function" then makefolder(CONFIG_FOLDER) end
+        local data = {}
+        for k, v in pairs(Config) do
+            if typeof(v) == "Color3" then
+                data[k] = colorToTable(v)
+            else
+                data[k] = v
+            end
+        end
+        writefile(CONFIG_FILE, HttpService:JSONEncode(data))
+    end)
+    return true
+end
+
+local function loadConfig()
+    if not canFile() then return end
+    pcall(function()
+        if isfile(CONFIG_FILE) then
+            local data = HttpService:JSONDecode(readfile(CONFIG_FILE))
+            for k, v in pairs(data) do
+                if Config[k] ~= nil then
+                    if typeof(Config[k]) == "Color3" and typeof(v) == "table" then
+                        Config[k] = tableToColor(v)
+                    else
+                        Config[k] = v
+                    end
+                end
+            end
+        end
+    end)
+end
+loadConfig()
+
+local TracerGui = Instance.new("ScreenGui")
+TracerGui.Name = "FlashStreets_Gui"
+TracerGui.IgnoreGuiInset = true
+TracerGui.ResetOnSpawn = false
+TracerGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+TracerGui.Parent = CoreGui
+
+local FOVCircle = Instance.new("Frame")
+FOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVCircle.Position = UDim2.fromScale(0.5, 0.5)
+FOVCircle.Size = UDim2.fromOffset(Config.FOVSize*2, Config.FOVSize*2)
+FOVCircle.BackgroundTransparency = 1
+FOVCircle.Parent = TracerGui
+Instance.new("UICorner", FOVCircle).CornerRadius = UDim.new(1, 0)
+local FOVStroke = Instance.new("UIStroke", FOVCircle)
+FOVStroke.Color = Config.FOVColor
+FOVStroke.Thickness = Config.FOVThick
+FOVStroke.Transparency = Config.FOVTrans
+
+local function createLine()
+    local line = Instance.new("Frame")
+    line.AnchorPoint = Vector2.new(0.5, 0.5)
+    line.BorderSizePixel = 0
+    line.Visible = false
+    line.ZIndex = 10
+    line.Parent = TracerGui
+    return line
+end
+
+local function updateLine(line, from, to, color, visible, thickness)
+    if not line then return end
+    if not visible then
+        if line.Visible then line.Visible = false end
+        return
+    end
+    local mid = (from + to) * 0.5
+    local dist = (to - from).Magnitude
+    if dist < 2 then line.Visible = false return end
+    local angle = math.deg(math.atan2(to.Y - from.Y, to.X - from.X))
+    line.Position = UDim2.fromOffset(mid.X, mid.Y)
+    line.Size = UDim2.fromOffset(dist, thickness or 2)
+    line.Rotation = angle
+    line.BackgroundColor3 = color
+    line.Visible = true
+end
+
+local BONES_R15 = {
+    {a="Head",b="UpperTorso",t="s"},{a="UpperTorso",b="LowerTorso",t="t"},
+    {a="UpperTorso",b="LeftUpperArm",t="t"},{a="UpperTorso",b="RightUpperArm",t="t"},
+    {a="LeftUpperArm",b="LeftLowerArm",t="a"},{a="LeftLowerArm",b="LeftHand",t="a"},
+    {a="RightUpperArm",b="RightLowerArm",t="a"},{a="RightLowerArm",b="RightHand",t="a"},
+    {a="LowerTorso",b="LeftUpperLeg",t="l"},{a="LeftUpperLeg",b="LeftLowerLeg",t="l"},
+    {a="LeftLowerLeg",b="LeftFoot",t="l"},{a="LowerTorso",b="RightUpperLeg",t="l"},
+    {a="RightUpperLeg",b="RightLowerLeg",t="l"},{a="RightLowerLeg",b="RightFoot",t="l"},
+}
+local BONES_R6 = {
+    {a="Head",b="Torso",t="s"},{a="Torso",b="Left Arm",t="a"},
+    {a="Torso",b="Right Arm",t="a"},{a="Torso",b="Left Leg",t="l"},{a="Torso",b="Right Leg",t="l"},
+}
+
+local ESPFolder = Instance.new("Folder")
+ESPFolder.Name = "FlashStreets_ESP"
+ESPFolder.Parent = CoreGui
+local ESP = {players = {}}
+
+local function clearPlayer(plr)
+    local d = ESP.players[plr]
+    if not d then return end
+    if d.billboard then pcall(function() d.billboard:Destroy() end) end
+    if d.tracer then pcall(function() d.tracer:Destroy() end) end
+    if d.boxLines then
+        for _, l in ipairs(d.boxLines) do pcall(function() l:Destroy() end) end
+    end
+    if d.bones then
+        for _, l in ipairs(d.bones) do pcall(function() l:Destroy() end) end
+    end
+    ESP.players[plr] = nil
+end
+
+local function ensurePlayer(plr)
+    if plr == LocalPlayer then return nil end
+    if ESP.players[plr] then return ESP.players[plr] end
+    local pack = {bones = {}, boxLines = {}}
+
+    local bb = Instance.new("BillboardGui")
+    bb.Size = UDim2.fromOffset(180, 42)
+    bb.StudsOffset = Vector3.new(0, 3.3, 0)
+    bb.AlwaysOnTop = true
+    bb.Enabled = false
+    bb.Parent = ESPFolder
+    local nameLbl = Instance.new("TextLabel")
+    nameLbl.Size = UDim2.new(1, 0, 0.55, 0)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.TextColor3 = Config.ESPColor
+    nameLbl.TextStrokeTransparency = 0.3
+    nameLbl.TextSize = 14
+    nameLbl.Font = Enum.Font.GothamBold
+    nameLbl.Parent = bb
+    local hpLbl = Instance.new("TextLabel")
+    hpLbl.Size = UDim2.new(1, 0, 0.45, 0)
+    hpLbl.Position = UDim2.new(0, 0, 0.55, 0)
+    hpLbl.BackgroundTransparency = 1
+    hpLbl.TextColor3 = Config.HPColor
+    hpLbl.TextStrokeTransparency = 0.3
+    hpLbl.TextSize = 12
+    hpLbl.Font = Enum.Font.Gotham
+    hpLbl.Parent = bb
+    pack.billboard = bb
+    pack.nameLbl = nameLbl
+    pack.hpLbl = hpLbl
+    pack.tracer = createLine()
+    for _ = 1, 16 do table.insert(pack.bones, createLine()) end
+    for _ = 1, 4 do table.insert(pack.boxLines, createLine()) end
+    ESP.players[plr] = pack
+    return pack
+end
+
+local function getBoneCol(t)
+    if t=="s" then return Config.SkullColor end
+    if t=="t" then return Config.TorsoColor end
+    if t=="a" then return Config.ArmColor end
+    if t=="l" then return Config.LegColor end
+    return Config.SkullColor
+end
+
+local function drawSkeleton(pack, char)
+    local pairsList = char:FindFirstChild("UpperTorso") and BONES_R15 or BONES_R6
+    for i, bone in ipairs(pack.bones) do
+        local link = pairsList[i]
+        if not link then
+            updateLine(bone, Vector2.zero, Vector2.zero, Color3.new(1,1,1), false)
+            continue
+        end
+        local a, b = char:FindFirstChild(link.a), char:FindFirstChild(link.b)
+        local col = getBoneCol(link.t)
+        if a and b then
+            local sa, oa = Camera:WorldToViewportPoint(a.Position)
+            local sb, ob = Camera:WorldToViewportPoint(b.Position)
+            if oa and ob and sa.Z > 0 and sb.Z > 0 then
+                updateLine(bone, Vector2.new(sa.X, sa.Y), Vector2.new(sb.X, sb.Y), col, true, Config.SkeletonThick)
+            else
+                updateLine(bone, Vector2.zero, Vector2.zero, col, false)
+            end
+        else
+            updateLine(bone, Vector2.zero, Vector2.zero, col, false)
+        end
+    end
+end
+
+local function hideSkeleton(pack)
+    for _, b in ipairs(pack.bones) do updateLine(b, Vector2.zero, Vector2.zero, Color3.new(1,1,1), false) end
+end
+
+local function drawBox(pack, char)
+    local head = char:FindFirstChild("Head")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not head or not hrp then
+        for _, l in ipairs(pack.boxLines) do updateLine(l, Vector2.zero, Vector2.zero, Config.BoxColor, false) end
+        return
+    end
+    local top = head.Position + Vector3.new(0, 0.5, 0)
+    local bot = hrp.Position - Vector3.new(0, 2.5, 0)
+    local lft = hrp.Position - Vector3.new(1.5, 0, 0)
+    local rgt = hrp.Position + Vector3.new(1.5, 0, 0)
+    local sT = Camera:WorldToViewportPoint(top)
+    local sB = Camera:WorldToViewportPoint(bot)
+    local sL = Camera:WorldToViewportPoint(lft)
+    local sR = Camera:WorldToViewportPoint(rgt)
+    if sT.Z <= 0 or sB.Z <= 0 then
+        for _, l in ipairs(pack.boxLines) do updateLine(l, Vector2.zero, Vector2.zero, Config.BoxColor, false) end
+        return
+    end
+    local x1 = math.min(sL.X, sR.X) - 5
+    local x2 = math.max(sL.X, sR.X) + 5
+    local y1, y2 = sT.Y, sB.Y
+    updateLine(pack.boxLines[1], Vector2.new(x1, y1), Vector2.new(x2, y1), Config.BoxColor, true, Config.BoxThick)
+    updateLine(pack.boxLines[2], Vector2.new(x2, y1), Vector2.new(x2, y2), Config.BoxColor, true, Config.BoxThick)
+    updateLine(pack.boxLines[3], Vector2.new(x2, y2), Vector2.new(x1, y2), Config.BoxColor, true, Config.BoxThick)
+    updateLine(pack.boxLines[4], Vector2.new(x1, y2), Vector2.new(x1, y1), Config.BoxColor, true, Config.BoxThick)
+end
+
+local function hideBox(pack)
+    for _, l in ipairs(pack.boxLines) do updateLine(l, Vector2.zero, Vector2.zero, Config.BoxColor, false) end
+end
+
+local function saveHead(head)
+    if not head:FindFirstChild("OrigSize") then
+        local v = Instance.new("Vector3Value")
+        v.Name = "OrigSize"
+        v.Value = head.Size
+        v.Parent = head
+    end
+    if not head:FindFirstChild("OrigTransparency") then
+        local t = Instance.new("NumberValue")
+        t.Name = "OrigTransparency"
+        t.Value = head.Transparency
+        t.Parent = head
+    end
+end
+
+local function updateHead()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local head = p.Character:FindFirstChild("Head")
+            if head and head:IsA("BasePart") then
+                saveHead(head)
+                local origSize = head.OrigSize.Value
+                local origTrans = head.OrigTransparency.Value
+                
+                if Config.HeadHitboxEnabled then
+                    head.Size = origSize * Config.HeadHitboxScale
+                    head.Transparency = Config.HeadTransparency
+                    head.LocalTransparencyModifier = Config.HeadTransparency
+                    head.CanCollide = false
+                    head.Massless = true
+                else
+                    head.Size = origSize
+                    head.Transparency = origTrans
+                    head.LocalTransparencyModifier = origTrans
+                    head.CanCollide = true
+                    head.Massless = false
+                end
+            end
+        end
+    end
+end
+
+local function resetAllHeads()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local head = p.Character:FindFirstChild("Head")
+            if head then
+                local origSize = head:FindFirstChild("OrigSize")
+                local origTrans = head:FindFirstChild("OrigTransparency")
+                if origSize then head.Size = origSize.Value end
+                if origTrans then
+                    head.Transparency = origTrans.Value
+                    head.LocalTransparencyModifier = origTrans.Value
+                end
+                head.CanCollide = true
+                head.Massless = false
+            end
+        end
+    end
+end
+
+local function getTarget()
+    local best, bestD = nil, Config.FOVSize
+    local c = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local rp = plr.Character:FindFirstChild("HumanoidRootPart")
+            local h = plr.Character:FindFirstChildOfClass("Humanoid")
+            if rp and h and h.Health > 0 then
+                local sp, on = Camera:WorldToViewportPoint(rp.Position)
+                if on then
+                    local d = (Vector2.new(sp.X, sp.Y) - c).Magnitude
+                    if d < bestD then bestD = d; best = rp end
+                end
+            end
+        end
+    end
+    return best
+end
+
+pcall(function()
+    local BaseWeapon = require(RS.WeaponsSystem.Libraries.BaseWeapon)
+    local oldFire = BaseWeapon.fire
+    BaseWeapon.fire = function(self, origin, dir, charge)
+        if Config.SilentAim then
+            local t = getTarget()
+            if t then dir = (t.Position - origin).Unit end
+        end
+        return oldFire(self, origin, dir, charge)
+    end
+end)
+
+local function getRemote(n)
+    local ws = RS:FindFirstChild("WeaponsSystem")
+    if not ws then return nil end
+    local net = ws:FindFirstChild("Network")
+    if not net then return nil end
+    return net:FindFirstChild(n)
+end
+
+local function getWeapon()
+    local c = LocalPlayer.Character
+    return c and c:FindFirstChildOfClass("Tool")
+end
+
+local function doReload()
+    if not Config.NoReload then return end
+    local t = getWeapon()
+    if not t then return end
+    local r = getRemote("WeaponReloadRequest")
+    if not r then return end
+    pcall(function()
+        if r:IsA("RemoteEvent") then r:FireServer(t)
+        elseif r:IsA("RemoteFunction") then r:InvokeServer(t) end
+    end)
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        doReload()
+    end
+end)
+
+local autoFlyThread = nil
+local currentWP = 1
+
+local function getHRP()
+    local c = LocalPlayer.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+local function stopAutoFly()
+    Config.AutoFly = false
+    if autoFlyThread then
+        pcall(function() task.cancel(autoFlyThread) end)
+        autoFlyThread = nil
+    end
+    local hrp = getHRP()
+    if hrp then
+        local bv = hrp:FindFirstChild("HoverBP")
+        if bv then bv:Destroy() end
+    end
+end
+
+local function startAutoFly()
+    if autoFlyThread then stopAutoFly() end
+    Config.AutoFly = true
+    autoFlyThread = task.spawn(function()
+        while Config.AutoFly do
+            local hrp = getHRP()
+            if not hrp then task.wait(0.5) continue end
+            local wpPos = WAYPOINTS[currentWP]
+            if not wpPos then currentWP = 1; wpPos = WAYPOINTS[1] end
+            local oldBP = hrp:FindFirstChild("HoverBP")
+            if oldBP then oldBP:Destroy() end
+            local bp = Instance.new("BodyPosition")
+            bp.Name = "HoverBP"
+            bp.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            bp.P = 100000
+            bp.D = 1000
+            bp.Position = wpPos
+            bp.Parent = hrp
+            local t0 = tick()
+            while Config.AutoFly and (hrp.Position - wpPos).Magnitude > 2 and (tick() - t0) < 15 do
+                task.wait(0.1)
+            end
+            task.wait(Config.AutoFlyWait)
+            if Config.AutoFlyLoop then
+                currentWP = currentWP + 1
+                if currentWP > #WAYPOINTS then currentWP = 1 end
+            else
+                break
+            end
+        end
+        Config.AutoFly = false
+        autoFlyThread = nil
+        local hrp = getHRP()
+        if hrp then
+            local bv = hrp:FindFirstChild("HoverBP")
+            if bv then bv:Destroy() end
+        end
+    end)
+end
+
+local antiConn
+local function setAntiAFK(on)
+    if antiConn then antiConn:Disconnect() antiConn = nil end
+    if not on then return end
+    antiConn = LocalPlayer.Idled:Connect(function()
+        local VirtualUser = game:GetService("VirtualUser")
+        VirtualUser:Button2Down(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        VirtualUser:Button2Up(Vector2.new(0, 0), Workspace.CurrentCamera.CFrame)
+    end)
+end
+if Config.AntiAFK then setAntiAFK(true) end
+
+local ESP_UPDATE_INTERVAL = 0.033
+local lastESPUpdate = 0
+
+RunService.RenderStepped:Connect(function(dt)
+    FOVCircle.Visible = Config.ShowFOV
+    if Config.HeadHitboxEnabled then updateHead() end
+    
+    local now = tick()
+    if now - lastESPUpdate >= ESP_UPDATE_INTERVAL then
+        lastESPUpdate = now
+        local myHRP = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local origin = Vector2.new(Camera.ViewportSize.X * 0.5, 0)
+        
+        local seen = {}
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr == LocalPlayer then continue end
+            seen[plr] = true
+            local char = plr.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local head = char and char:FindFirstChild("Head")
+            local chest = char and (char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"))
+            local pack = ensurePlayer(plr)
+            if not pack then continue end
+            
+            if not char or not hum or hum.Health <= 0 or not head then
+                pack.billboard.Enabled = false
+                updateLine(pack.tracer, origin, origin, Config.TracerColor, false)
+                hideSkeleton(pack)
+                hideBox(pack)
+                continue
+            end
+            
+            local dist = 0
+            if myHRP and chest then dist = (myHRP.Position - chest.Position).Magnitude end
+            
+            if Config.ESP then
+                pack.billboard.Adornee = head
+                pack.billboard.Enabled = true
+                pack.nameLbl.Text = plr.Name
+                pack.nameLbl.TextColor3 = Config.ESPColor
+                pack.hpLbl.Text = "HP: " .. math.floor(hum.Health)
+                pack.hpLbl.TextColor3 = Config.HPColor
+            else
+                pack.billboard.Enabled = false
+            end
+            
+            if Config.Skeleton and dist <= Config.SkeletonDist then
+                drawSkeleton(pack, char)
+            else
+                hideSkeleton(pack)
+            end
+            
+            if Config.BoxESP and dist <= Config.SkeletonDist then
+                drawBox(pack, char)
+            else
+                hideBox(pack)
+            end
+            
+            if Config.Tracer and chest then
+                local sp, on = Camera:WorldToViewportPoint(chest.Position)
+                if on and sp.Z > 0 then
+                    updateLine(pack.tracer, origin, Vector2.new(sp.X, sp.Y), Config.TracerColor, true, Config.TracerThick)
+                else
+                    updateLine(pack.tracer, origin, origin, Config.TracerColor, false)
+                end
+            else
+                updateLine(pack.tracer, origin, origin, Config.TracerColor, false)
+            end
+        end
+        
+        for plr in pairs(ESP.players) do
+            if not seen[plr] then clearPlayer(plr) end
+        end
+    end
+    
+    -- ★ ระบบวิ่งเร็ว (Smooth Speed Boost ที่แก้ไขและปรับแต่งแล้ว ไม่กระตุก)
+    if Config.Speed and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hum and hrp and hum.MoveDirection.Magnitude > 0 then
+            hrp.CFrame = hrp.CFrame + (hum.MoveDirection * (Config.SpeedVal - 16) * dt)
+        end
+    end
+    
+    if Config.Fly and LocalPlayer.Character then
+        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hrp and hum then
+            local bv = hrp:FindFirstChild("FlyBV") or Instance.new("BodyVelocity", hrp)
+            bv.Name = "FlyBV"
+            bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+            local bg = hrp:FindFirstChild("FlyBG") or Instance.new("BodyGyro", hrp)
+            bg.Name = "FlyBG"
+            bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+            bg.CFrame = Camera.CFrame
+            local md = hum.MoveDirection
+            if md.Magnitude > 0 then
+                bv.Velocity = (Camera.CFrame.LookVector * (md:Dot(Camera.CFrame.LookVector)) + Camera.CFrame.RightVector * (md:Dot(Camera.CFrame.RightVector))) * Config.FlySpeed
+            else
+                bv.Velocity = Vector3.new(0,0,0)
+            end
+        end
+    else
+        if LocalPlayer.Character then
+            local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                for _, c in pairs(hrp:GetChildren()) do
+                    if c.Name == "FlyBV" or c.Name == "FlyBG" then c:Destroy() end
+                end
+            end
+        end
+    end
+end)
+
+Players.PlayerRemoving:Connect(clearPlayer)
+
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+local Window = WindUI:CreateWindow({
+    Title = "FLASH PANEL - CL STREETS",
+    Icon = IMAGE_ID,
+    Author = "CL Streets",
+    Folder = "FlashStreets",
+    Size = UDim2.fromOffset(600, 480),
+    Transparent = true,
+    Theme = "Dark",
+    SideBarWidth = 200,
+    HideSearchBar = true,
+})
+Window:EditOpenButton({ Enabled = false })
+
+local TabCombat = Window:Tab({ Title = "Combat", Icon = "crosshair" })
+TabCombat:Section({ Title = "Aim" })
+TabCombat:Toggle({ Title = "Silent Aim", Desc = "Auto lock target", Value = Config.SilentAim, Callback = function(v) playClick(); Config.SilentAim = v; saveConfig() end })
+
+TabCombat:Section({ Title = "FOV" })
+TabCombat:Toggle({ Title = "Show FOV Circle", Value = Config.ShowFOV, Callback = function(v) playClick(); Config.ShowFOV = v; saveConfig() end })
+TabCombat:Slider({ Title = "FOV Size (10-800)", Step = 5, Value = { Min = 10, Max = 800, Default = Config.FOVSize }, Callback = function(v) Config.FOVSize = v; FOVCircle.Size = UDim2.fromOffset(v*2, v*2); saveConfig() end })
+TabCombat:Colorpicker({ Title = "FOV Color", Default = Config.FOVColor, Callback = function(v) playClick(); Config.FOVColor = v; FOVStroke.Color = v; saveConfig() end })
+TabCombat:Slider({ Title = "FOV Thickness", Step = 0.5, Value = { Min = 0.5, Max = 10, Default = Config.FOVThick }, Callback = function(v) Config.FOVThick = v; FOVStroke.Thickness = v; saveConfig() end })
+TabCombat:Slider({ Title = "FOV Transparency", Step = 0.1, Value = { Min = 0, Max = 0.9, Default = Config.FOVTrans }, Callback = function(v) Config.FOVTrans = v; FOVStroke.Transparency = v; saveConfig() end })
+
+TabCombat:Section({ Title = "Head Hitbox Expander" })
+TabCombat:Toggle({ Title = "Head Expand + Transparent", Desc = "ขยายหัว + หัวใส", Value = Config.HeadHitboxEnabled, Callback = function(v) 
+    playClick()
+    Config.HeadHitboxEnabled = v
+    if not v then resetAllHeads() end
+    saveConfig()
+end })
+TabCombat:Slider({ Title = "Head Scale (1-50)", Step = 1, Value = { Min = 1, Max = 50, Default = Config.HeadHitboxScale }, Callback = function(v) 
+    Config.HeadHitboxScale = v
+    if Config.HeadHitboxEnabled then updateHead() end
+    saveConfig()
+end })
+TabCombat:Slider({ Title = "Head Transparency (0-1)", Step = 0.05, Value = { Min = 0, Max = 1, Default = Config.HeadTransparency }, Callback = function(v) 
+    Config.HeadTransparency = v
+    if Config.HeadHitboxEnabled then updateHead() end
+    saveConfig()
+end })
+
+local TabVisual = Window:Tab({ Title = "Visuals", Icon = "eye" })
+TabVisual:Section({ Title = "ESP" })
+TabVisual:Toggle({ Title = "Player ESP", Value = Config.ESP, Callback = function(v) playClick(); Config.ESP = v; saveConfig() end })
+TabVisual:Colorpicker({ Title = "Name Color", Default = Config.ESPColor, Callback = function(v) playClick(); Config.ESPColor = v; saveConfig() end })
+TabVisual:Colorpicker({ Title = "HP Color", Default = Config.HPColor, Callback = function(v) playClick(); Config.HPColor = v; saveConfig() end })
+
+TabVisual:Section({ Title = "Skeleton X-Ray" })
+TabVisual:Toggle({ Title = "Skeleton ESP", Value = Config.Skeleton, Callback = function(v) playClick(); Config.Skeleton = v; saveConfig() end })
+TabVisual:Slider({ Title = "Skeleton Distance", Step = 50, Value = { Min = 50, Max = 1000, Default = Config.SkeletonDist }, Callback = function(v) Config.SkeletonDist = v; saveConfig() end })
+TabVisual:Slider({ Title = "Skeleton Thickness", Step = 0.5, Value = { Min = 0.5, Max = 5, Default = Config.SkeletonThick }, Callback = function(v) Config.SkeletonThick = v; saveConfig() end })
+TabVisual:Colorpicker({ Title = "Skull Color", Default = Config.SkullColor, Callback = function(v) playClick(); Config.SkullColor = v; saveConfig() end })
+TabVisual:Colorpicker({ Title = "Torso Color", Default = Config.TorsoColor, Callback = function(v) playClick(); Config.TorsoColor = v; saveConfig() end })
+TabVisual:Colorpicker({ Title = "Arm Color", Default = Config.ArmColor, Callback = function(v) playClick(); Config.ArmColor = v; saveConfig() end })
+TabVisual:Colorpicker({ Title = "Leg Color", Default = Config.LegColor, Callback = function(v) playClick(); Config.LegColor = v; saveConfig() end })
+
+TabVisual:Section({ Title = "Box ESP" })
+TabVisual:Toggle({ Title = "Box ESP", Value = Config.BoxESP, Callback = function(v) playClick(); Config.BoxESP = v; saveConfig() end })
+TabVisual:Colorpicker({ Title = "Box Color", Default = Config.BoxColor, Callback = function(v) playClick(); Config.BoxColor = v; saveConfig() end })
+TabVisual:Slider({ Title = "Box Thickness", Step = 0.5, Value = { Min = 0.5, Max = 5, Default = Config.BoxThick }, Callback = function(v) Config.BoxThick = v; saveConfig() end })
+
+TabVisual:Section({ Title = "Tracer" })
+TabVisual:Toggle({ Title = "Tracer ESP", Value = Config.Tracer, Callback = function(v) playClick(); Config.Tracer = v; saveConfig() end })
+TabVisual:Colorpicker({ Title = "Tracer Color", Default = Config.TracerColor, Callback = function(v) playClick(); Config.TracerColor = v; saveConfig() end })
+TabVisual:Slider({ Title = "Tracer Thickness", Step = 0.5, Value = { Min = 0.5, Max = 5, Default = Config.TracerThick }, Callback = function(v) Config.TracerThick = v; saveConfig() end })
+
+local TabMove = Window:Tab({ Title = "Movement", Icon = "move" })
+TabMove:Section({ Title = "Speed and Fly" })
+TabMove:Toggle({ Title = "Speed Boost", Value = Config.Speed, Callback = function(v) playClick(); Config.Speed = v; saveConfig() end })
+-- ★ ปรับสไลด์บาร์ความเร็วสูงสุดเป็น 32 ตามที่ต้องการ
+TabMove:Slider({ Title = "Speed Value", Step = 1, Value = { Min = 16, Max = 32, Default = Config.SpeedVal }, Callback = function(v) Config.SpeedVal = v; saveConfig() end })
+TabMove:Toggle({ Title = "Fly Hack", Value = Config.Fly, Callback = function(v) playClick(); Config.Fly = v; saveConfig() end })
+TabMove:Slider({ Title = "Fly Speed", Step = 5, Value = { Min = 20, Max = 200, Default = Config.FlySpeed }, Callback = function(v) Config.FlySpeed = v; saveConfig() end })
+
+local TabAutoFly = Window:Tab({ Title = "Auto Fly", Icon = "plane" })
+TabAutoFly:Section({ Title = "Waypoints 6 Points" })
+TabAutoFly:Paragraph({
+    Title = "Waypoint List",
+    Desc = "1. 2252.81, 605.31, 314.73\n2. 2253.19, 603.65, 145.26\n3. 1973.28, 607.79, 352.58\n4. 1776.15, 612.77, 135.97\n5. 1789.46, 607.61, 419.74\n6. 1998.29, 606.87, 130.95"
+})
+TabAutoFly:Toggle({ Title = "Auto Fly Waypoint", Value = Config.AutoFly, Callback = function(v) playClick(); if v then startAutoFly() else stopAutoFly() end; Config.AutoFly = v; saveConfig() end })
+TabAutoFly:Slider({ Title = "Auto Fly Speed", Step = 10, Value = { Min = 20, Max = 500, Default = Config.AutoFlySpeed }, Callback = function(v) Config.AutoFlySpeed = v; saveConfig() end })
+TabAutoFly:Slider({ Title = "Wait Time (s)", Step = 0.5, Value = { Min = 0, Max = 10, Default = Config.AutoFlyWait }, Callback = function(v) Config.AutoFlyWait = v; saveConfig() end })
+TabAutoFly:Toggle({ Title = "Loop", Value = Config.AutoFlyLoop, Callback = function(v) playClick(); Config.AutoFlyLoop = v; saveConfig() end })
+TabAutoFly:Button({ Title = "Go to Point 1", Callback = function() playClick(); currentWP = 1; local hrp = getHRP(); if hrp then hrp.CFrame = CFrame.new(WAYPOINTS[1]) end end })
+TabAutoFly:Button({ Title = "Stop Auto Fly", Callback = function() playClick(); stopAutoFly() end })
+
+local TabWeapon = Window:Tab({ Title = "Weapon", Icon = "sword" })
+TabWeapon:Section({ Title = "No Reload" })
+TabWeapon:Toggle({ Title = "No Reload", Value = Config.NoReload, Callback = function(v) playClick(); Config.NoReload = v; saveConfig() end })
+TabWeapon:Button({ Title = "Reload Now", Callback = function() playClick(); doReload() end })
+
+local TabPlayer = Window:Tab({ Title = "Player", Icon = "user" })
+TabPlayer:Toggle({ Title = "Anti AFK", Value = Config.AntiAFK, Callback = function(v) playClick(); Config.AntiAFK = v; setAntiAFK(v); saveConfig() end })
+
+local TabSettings = Window:Tab({ Title = "Settings", Icon = "settings" })
+TabSettings:Paragraph({ Title = "Config Info", Desc = "User: " .. LocalPlayer.Name .. " | ID: " .. LocalPlayer.UserId })
+TabSettings:Button({ Title = "Save Config", Callback = function() playClick(); saveConfig(); print("[FS] Saved") end })
+TabSettings:Button({ Title = "Load Config", Callback = function() playClick(); loadConfig(); print("[FS] Loaded") end })
+TabSettings:Button({ Title = "Reset Config", Callback = function() playClick(); pcall(function() if typeof(delfile) == "function" and isfile(CONFIG_FILE) then delfile(CONFIG_FILE) end end); print("[FS] Reset") end })
+
+pcall(function()
+    local old = CoreGui:FindFirstChild("FlashStreets_Toggle")
+    if old then old:Destroy() end
+end)
+local SG = Instance.new("ScreenGui")
+SG.Name = "FlashStreets_Toggle"
+SG.ResetOnSpawn = false
+SG.Parent = CoreGui
+local Btn = Instance.new("ImageButton")
+Btn.Size = UDim2.fromOffset(52, 52)
+Btn.Position = UDim2.new(0, 20, 0.5, -26)
+Btn.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+Btn.BackgroundTransparency = 0.15
+Btn.Image = IMAGE_ID
+Btn.ScaleType = Enum.ScaleType.Fit
+Btn.AutoButtonColor = false
+Btn.BorderSizePixel = 0
+Btn.Parent = SG
+Instance.new("UICorner", Btn).CornerRadius = UDim.new(1, 0)
+local st = Instance.new("UIStroke", Btn)
+st.Color = Color3.fromRGB(0, 170, 255)
+st.Thickness = 1.5
+st.Transparency = 0.25
+
+local drag, d0, p0
+Btn.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        drag = true; d0 = i.Position; p0 = Btn.Position
+    end
+end)
+Btn.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        drag = false
+    end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if not drag then return end
+    if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
+        local d = i.Position - d0
+        Btn.Position = UDim2.new(p0.X.Scale, p0.X.Offset + d.X, p0.Y.Scale, p0.Y.Offset + d.Y)
+    end
+end)
+Btn.MouseButton1Click:Connect(function() playClick(); Window:Toggle() end)
+
+print("[FLASH PANEL] Loaded - Speed Boost Fixed & Optimized")
